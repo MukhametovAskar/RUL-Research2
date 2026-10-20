@@ -5,7 +5,7 @@ import torch
 
 from src.data.cmapss_loader import prepare_cmapss
 from src.data.windowing import extract_windows
-from src.models.proxy_encoder import ProxySREncoder
+from src.models.proxy_encoder import STARProxyModel
 from src.utils.metrics import nasa_score, rmse
 from src.utils.seed import set_seed
 
@@ -24,7 +24,7 @@ def main(cfg: DictConfig):
     X_test, y_test = extract_windows(test_df, features, cfg.data.window_size, is_test=True)
     X_test_tensor = torch.tensor(X_test, dtype=torch.float32).to(device)
 
-    encoder = ProxySREncoder(
+    encoder = STARProxyModel(
         window=cfg.data.window_size,
         n_sensors=len(features),
         emb_dim=cfg.model.emb_dim,

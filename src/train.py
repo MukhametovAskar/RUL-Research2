@@ -14,7 +14,7 @@ from src.data.windowing import CMAPSSDataset, extract_windows
 from src.engine.evaluator import evaluate
 from src.engine.loss import HybridProxyLoss
 from src.engine.trainer import train_one_epoch
-from src.models.proxy_encoder import ProxySREncoder
+from src.models.proxy_encoder import STARProxyModel
 from src.utils.metrics import nasa_score, rmse
 from src.utils.plots import plot_diagnostics, plot_learning_curves, plot_results
 from src.utils.seed import set_seed
@@ -42,7 +42,7 @@ def main(cfg: DictConfig):
     X_test_tensor = torch.tensor(X_test, dtype=torch.float32).to(device)
 
     n_sensors = len(features)
-    encoder = ProxySREncoder(
+    encoder = STARProxyModel(
         window=cfg.data.window_size,
         n_sensors=n_sensors,
         emb_dim=cfg.model.emb_dim,

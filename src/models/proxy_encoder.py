@@ -108,7 +108,7 @@ class STAREncoder(nn.Module):
         return features
 
 
-class ProxySREncoder(nn.Module):
+class STARProxyModel(nn.Module):
     def __init__(self, window, n_sensors, emb_dim, num_proxies, max_rul, temp=0.1, dropout=0.1,
                  d_model=64, nhead=2, num_scales=2, ffn_dim=128, patch_size=4, pos_learnable=True):
         super().__init__()

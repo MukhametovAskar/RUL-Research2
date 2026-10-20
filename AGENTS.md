@@ -50,7 +50,7 @@ Sensors used: 14 active sensors (`s1, s5, s6, s10, s16, s18, s19` dropped).
 - `STARAttentionBlock` — dual spatio-temporal attention: temporal MHA per sensor + sensor MHA per timestep
 - `PatchMerging` — hierarchical patch merging across scale stages
 - `STAREncoder` — multi-scale encoder
-- `ProxySREncoder` — full model: multi-scale last-patch pooling across layers, linear projection, cosine similarity against learnable proxy attractors, softmax weighting for continuous RUL prediction
+- `STARProxyModel` — full model: multi-scale last-patch pooling across layers, linear projection, cosine similarity against learnable proxy attractors, softmax weighting for continuous RUL prediction
 
 `src/engine/loss.py`:
 - `HybridProxyLoss` — weighted sum of MSE and KL-divergence
