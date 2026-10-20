@@ -1,0 +1,16 @@
+dataset_name: FD003
+data_root: ${data_root}
+train_path: ${data.data_root}/train_${data.dataset_name}.txt
+test_path: ${data.data_root}/test_${data.dataset_name}.txt
+rul_path: ${data.data_root}/RUL_${data.dataset_name}.txt
+
+window_size: 48
+n_clusters: 1
+batch_size: 32
+lr: 2e-4
+weight_decay: 1e-4
+d_model: 64
+nhead: 1
+num_scales: 2
+ffn_dim: 128
+dropout: 0.1

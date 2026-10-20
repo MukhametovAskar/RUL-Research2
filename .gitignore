@@ -29,7 +29,7 @@ artifacts/
 runs/
 plots/
 checkpoints/
-data/
+/data/
 *.pth
 *.csv
 .DS_Store

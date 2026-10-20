@@ -1,0 +1,16 @@
+dataset_name: FD004
+data_root: ${data_root}
+train_path: ${data.data_root}/train_${data.dataset_name}.txt
+test_path: ${data.data_root}/test_${data.dataset_name}.txt
+rul_path: ${data.data_root}/RUL_${data.dataset_name}.txt
+
+window_size: 64
+n_clusters: 6
+batch_size: 64
+lr: 2e-5
+weight_decay: 1e-2
+d_model: 128
+nhead: 4
+num_scales: 3
+ffn_dim: 256
+dropout: 0.3
