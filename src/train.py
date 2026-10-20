@@ -129,6 +129,17 @@ def main(cfg: DictConfig):
                 writer.add_scalar("Best/RMSE", best_rmse, epoch)
                 writer.add_scalar("Best/S_Score", cur_score, epoch)
 
+            if cfg.trainer.save_epoch is not None:
+                save_epochs = [cfg.trainer.save_epoch] if isinstance(cfg.trainer.save_epoch, int) else list(cfg.trainer.save_epoch)
+                if (epoch + 1) in save_epochs:
+                    epoch_model_path = f"checkpoints/epoch{epoch + 1}_proxy_{cfg.data.dataset_name}.pth"
+                    torch.save(ema_encoder.state_dict(), epoch_model_path)
+                    print(f"  -> Saved epoch {epoch + 1} model to {epoch_model_path}")
+
+    last_model_path = f"checkpoints/last_proxy_{cfg.data.dataset_name}.pth"
+    torch.save(ema_encoder.state_dict(), last_model_path)
+    print(f"  -> Saved last model to {last_model_path}")
+
     plot_learning_curves(csv_path, cfg.data.dataset_name, save_dir="plots")
 
     ema_encoder.load_state_dict(torch.load(best_model_path, map_location=device))

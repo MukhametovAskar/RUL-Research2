@@ -70,13 +70,16 @@ PYTHONPATH=. python src/train.py data=fd001 trainer.epochs=30 model.num_proxies=
 | `model.temp` | 0.02 | Softmax retrieval temperature |
 | `model.emb_dim` | 64 | Metric embedding dimension |
 | `trainer.epochs` | 20 | Total training epochs |
+| `trainer.save_epoch` | null | Specific epoch to save weights checkpoint (e.g. 14) |
 | `trainer.kl_weight` | 1.0 | KL-divergence loss weight |
 | `trainer.mse_weight` | 0.05 | MSE loss weight |
 | `trainer.ema_decay` | 0.99 | Exponential moving average decay |
 
 ## Outputs
 
-- `checkpoints/best_proxy_FD00X.pth` — checkpoint of the best model
+- `checkpoints/best_proxy_FD00X.pth` — checkpoint of the best model (by test RMSE)
+- `checkpoints/last_proxy_FD00X.pth` — checkpoint of the final epoch
+- `checkpoints/epoch<N>_proxy_FD00X.pth` — checkpoint of specified epoch when `trainer.save_epoch` is used
 - `metrics_FD00X.csv` — logged epoch-by-epoch metrics
 - `plots/` — diagnostic plots, loss curves, and t-SNE latent visualizations
 - `runs/` — TensorBoard event logs (`tensorboard --logdir=runs/FD001`)

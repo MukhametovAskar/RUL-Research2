@@ -62,6 +62,8 @@ EMA tracking: `torch.optim.swa_utils.AveragedModel` with exponential moving aver
 
 Hydra writes run artifacts to `artifacts/outputs/<timestamp>/`:
 - `checkpoints/best_proxy_FD00X.pth` — best checkpoint by test RMSE
+- `checkpoints/last_proxy_FD00X.pth` — checkpoint from the final training epoch
+- `checkpoints/epoch<N>_proxy_FD00X.pth` — checkpoint from user-specified epoch (`trainer.save_epoch=N`)
 - `metrics_FD00X.csv` — per-epoch loss and evaluation metrics
 - `plots/` — diagnostic plots, learning curves, t-SNE attractor map
 - `runs/` — TensorBoard event files
