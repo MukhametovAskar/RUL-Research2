@@ -33,9 +33,25 @@ PYTHONPATH=. python src/train.py data=fd001
 # FD002
 PYTHONPATH=. python src/train.py data=fd002
 
+# Save weights at a specific epoch (e.g., epoch 14) alongside best and last:
+PYTHONPATH=. python src/train.py data=fd001 trainer.epochs=20 trainer.save_epoch=14
+
 # With custom data path
 PYTHONPATH=. python src/train.py data=fd001 data_root=/path/to/cmapss
 ```
+
+### Saving specific epoch checkpoints
+
+If you want to preserve weights from a specific training epoch (for instance, if validation indicates epoch 14 is optimal, while test RMSE peaks later), pass `trainer.save_epoch`:
+
+```bash
+PYTHONPATH=. python src/train.py data=fd001 trainer.epochs=20 trainer.save_epoch=14
+```
+
+This saves:
+- `checkpoints/epoch14_proxy_FD001.pth` — weights at epoch 14
+- `checkpoints/best_proxy_FD001.pth` — weights with lowest test RMSE
+- `checkpoints/last_proxy_FD001.pth` — weights from final epoch (epoch 20)
 
 ## Inference
 
