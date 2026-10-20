@@ -1,0 +1,5 @@
+emb_dim: 64
+num_proxies: 12
+temp: 0.02
+patch_size: 4
+pos_learnable: true

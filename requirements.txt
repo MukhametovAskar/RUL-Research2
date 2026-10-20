@@ -1,0 +1,10 @@
+torch
+numpy
+pandas
+matplotlib
+seaborn
+scikit-learn
+hydra-core
+omegaconf
+tqdm
+tensorboard

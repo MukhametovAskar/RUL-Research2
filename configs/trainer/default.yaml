@@ -1,0 +1,5 @@
+epochs: 20
+ema_decay: 0.99
+kl_weight: 1.0
+mse_weight: 0.05
+device: cuda

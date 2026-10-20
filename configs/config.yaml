@@ -1,0 +1,13 @@
+defaults:
+  - model: proxy
+  - data: fd001
+  - trainer: default
+  - _self_
+
+seed: 43
+max_rul: 125
+data_root: ./data
+
+hydra:
+  run:
+    dir: artifacts/outputs/${now:%Y-%m-%d_%H-%M-%S}
