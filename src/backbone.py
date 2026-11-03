@@ -1,36 +1,43 @@
 import math
+from typing import List
+
 import torch
 import torch.nn as nn
-import torch.nn.functional as F
 
 
 class PatchEmbedDimWise(nn.Module):
-    def __init__(self, window, n_sensors, patch_size, d_model, pos_learnable=True):
+    """Поканальное (dimension-wise) разбиение временного окна каждого датчика на патчи с обучаемым позиционным кодированием."""
+
+    def __init__(self, window: int, n_sensors: int, patch_size: int, d_model: int, pos_learnable: bool = True):
         super().__init__()
+        self.window = window
         self.P = patch_size
         self.n_patches = math.ceil(window / patch_size)
-        self.patch_proj = nn.Linear(patch_size, d_model, bias=True)
+        self.d_model = d_model
+        self.patch_proj = nn.Linear(self.P, d_model, bias=True)
         if pos_learnable:
             self.pos_embed = nn.Parameter(torch.zeros(n_sensors, self.n_patches, d_model))
             nn.init.trunc_normal_(self.pos_embed, std=0.02)
         else:
             self.pos_embed = None
 
-    def forward(self, x):
+    def forward(self, x: torch.Tensor) -> torch.Tensor:
         B, W, S = x.shape
         pad_len = (self.n_patches * self.P) - W
         if pad_len > 0:
             x = torch.cat([x, x[:, -1:, :].repeat(1, pad_len, 1)], dim=1)
         x = x.view(B, self.n_patches, self.P, S).permute(0, 3, 1, 2).contiguous()
         emb_flat = self.patch_proj(x.view(B * S * self.n_patches, self.P))
-        emb = emb_flat.view(B, S, self.n_patches, -1)
+        emb = emb_flat.view(B, S, self.n_patches, self.d_model)
         if self.pos_embed is not None:
             emb = emb + self.pos_embed.unsqueeze(0)
         return emb
 
 
 class STARAttentionBlock(nn.Module):
-    def __init__(self, d_model, nhead, ffn_dim=128, dropout=0.1):
+    """Двойной пространственно-временной блок внимания (Temporal MHA внутри датчика + Sensor MHA между датчиками)."""
+
+    def __init__(self, d_model: int, nhead: int, ffn_dim: int = 128, dropout: float = 0.1):
         super().__init__()
         self.temporal_mha = nn.MultiheadAttention(d_model, nhead, dropout=dropout, batch_first=True)
         self.temporal_norm1 = nn.LayerNorm(d_model)
@@ -52,7 +59,7 @@ class STARAttentionBlock(nn.Module):
         )
         self.sensor_norm2 = nn.LayerNorm(d_model)
 
-    def forward(self, x):
+    def forward(self, x: torch.Tensor) -> torch.Tensor:
         B, S, T, d = x.shape
         res = x
         x_flat = x.view(B * S, T, d)
@@ -69,11 +76,13 @@ class STARAttentionBlock(nn.Module):
 
 
 class PatchMerging(nn.Module):
-    def __init__(self, d_model):
+    """Иерархическое слияние соседних временных патчей между масштабами."""
+
+    def __init__(self, d_model: int):
         super().__init__()
         self.proj = nn.Linear(d_model * 2, d_model)
 
-    def forward(self, x):
+    def forward(self, x: torch.Tensor) -> torch.Tensor:
         B, S, T, d = x.shape
         if T <= 1:
             return x
@@ -87,16 +96,30 @@ class PatchMerging(nn.Module):
 
 
 class STAREncoder(nn.Module):
-    def __init__(self, n_scales, d_model, nhead, ffn_dim, dropout, n_layers_per_scale=2):
+    """Многомасштабный иерархический энкодер STAR."""
+
+    def __init__(
+        self,
+        n_scales: int,
+        d_model: int,
+        nhead: int,
+        ffn_dim: int,
+        dropout: float,
+        n_layers_per_scale: int = 2,
+    ):
         super().__init__()
         self.n_scales = n_scales
-        self.layers = nn.ModuleList([
-            nn.ModuleList([STARAttentionBlock(d_model, nhead, ffn_dim, dropout) for _ in range(n_layers_per_scale)])
-            for _ in range(n_scales)
-        ])
+        self.layers = nn.ModuleList(
+            [
+                nn.ModuleList(
+                    [STARAttentionBlock(d_model, nhead, ffn_dim, dropout) for _ in range(n_layers_per_scale)]
+                )
+                for _ in range(n_scales)
+            ]
+        )
         self.patch_merging = nn.ModuleList([PatchMerging(d_model) for _ in range(n_scales - 1)])
 
-    def forward(self, x):
+    def forward(self, x: torch.Tensor) -> List[torch.Tensor]:
         features = []
         cur = x
         for i in range(self.n_scales):
@@ -106,36 +129,3 @@ class STAREncoder(nn.Module):
             if i < self.n_scales - 1:
                 cur = self.patch_merging[i](cur)
         return features
-
-
-class STARProxyModel(nn.Module):
-    def __init__(self, window, n_sensors, emb_dim, num_proxies, max_rul, temp=0.1, dropout=0.1,
-                 d_model=64, nhead=2, num_scales=2, ffn_dim=128, patch_size=4, pos_learnable=True):
-        super().__init__()
-        self.patch_embed = PatchEmbedDimWise(window, n_sensors, patch_size, d_model, pos_learnable=pos_learnable)
-        self.encoder = STAREncoder(num_scales, d_model, nhead, ffn_dim, dropout=dropout, n_layers_per_scale=2)
-        self.fc = nn.Linear(d_model * num_scales, emb_dim)
-        self.temp = temp
-        self.proxies = nn.Parameter(torch.randn(num_proxies, emb_dim))
-        nn.init.orthogonal_(self.proxies)
-        self.register_buffer("proxy_ruls", torch.linspace(0, max_rul, num_proxies))
-
-    def forward(self, x):
-        emb = self.patch_embed(x)
-        enc_feats = self.encoder(emb)
-        pooled_feats = []
-        for feat in enc_feats:
-            pooled = feat[:, :, -1, :].mean(dim=1)
-            pooled_feats.append(pooled)
-        concat_feat = torch.cat(pooled_feats, dim=-1)
-        raw_emb = self.fc(concat_feat)
-
-        emb_norm = F.normalize(raw_emb, p=2, dim=1)
-        proxies_norm = F.normalize(self.proxies, p=2, dim=1)
-
-        sim = torch.matmul(emb_norm, proxies_norm.T)
-        weights = F.softmax(sim / self.temp, dim=1)
-        log_weights = F.log_softmax(sim / self.temp, dim=1)
-        pred_rul = torch.sum(weights * self.proxy_ruls, dim=1)
-
-        return pred_rul, log_weights, emb_norm, proxies_norm

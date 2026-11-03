@@ -1,6 +1,14 @@
-epochs: 20
+epochs: null
 ema_decay: 0.99
 kl_weight: 1.0
 mse_weight: 0.05
+lambda_order: 0.5
+use_proxy_1k: true
+norm_mode: regime
+use_validation: false
+val_split: 0.15
 device: cuda
 save_epoch: null
+save_weights: true
+save_plots: true
+enable_tb: true

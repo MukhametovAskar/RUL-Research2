@@ -2,12 +2,12 @@
 
 ## What this is
 
-Research code for Remaining Useful Life (RUL) prediction on NASA C-MAPSS turbofan engine datasets (FD001–FD004).
-Model: **STAR + Proxy Metric Learning** — Spatio-temporal Attention Transformer encoder with learnable proxy attractors and Label Distribution Learning loss (KL-divergence + MSE).
+Research code for Remaining Useful Life (RUL) prediction on NASA C-MAPSS turbofan engine datasets (FD001–FD004) and a 5-seed Ablation Study (`42, 43, 44, 45, 50`).
+Model: **STAREncoder + Spherical Proxy-Head + LDL (KL-Loss) + Cosine Gram Order + Decoupled Residual Head + Proxy-Centric 1/K Loss + Regime-Specific Normalization**.
 
 ## Stack
 
-Python 3.10+ · PyTorch · Hydra (config) · scikit-learn · pandas · numpy · seaborn · matplotlib
+Python 3.10+ · PyTorch · Hydra / OmegaConf · scikit-learn · pandas · numpy · seaborn · matplotlib
 
 Install: `pip install -r requirements.txt`
 Download data: `python scripts/download_data.py`
@@ -16,54 +16,24 @@ Download data: `python scripts/download_data.py`
 
 | Command | Purpose |
 |---------|---------|
-| `python src/train.py` | Train proxy metric learning model |
-| `python src/inference.py` | Evaluate checkpoint (prompts for `.pth` path) |
+| `python -m src.train` | Train a single configuration using Hydra (`data=fd001 seed=50`) or `--` CLI flags (`--dataset FD001 --seed 50 --exp 0`) |
+| `python run_ablation.py` | Run ablation experiments (`00`–`07`) across datasets and seeds (`42, 43, 44, 45, 50`) with automatic `--resume` |
+| `python sync_results.py` | Merge previous Kaggle session results with current runs and package `results_backup.zip` |
+| `python aggregate_results.py` | Aggregate partial/complete results (`Mean ± Std`) into Markdown, CSV, and LaTeX (`booktabs`) |
 
-### Training examples
+### Examples
 
 ```bash
-PYTHONPATH=. python src/train.py data=fd001
-PYTHONPATH=. python src/train.py data=fd002 trainer.epochs=30
-PYTHONPATH=. python src/train.py data=fd001 data_root=/path/to/cmapss
+python run_ablation.py --list
+python -m src.train --dataset FD001 --seed 50 --exp 00_full_model
+python run_ablation.py --exps all --datasets all --seeds 42 43 44 45 50
+python aggregate_results.py --out_dir results
 ```
 
-## Data
+## Strict Invariants
 
-C-MAPSS dataset files are not kept in the repository. Expected flat structure:
-
-```
-data/
-  train_FD001.txt  test_FD001.txt  RUL_FD001.txt
-  train_FD002.txt  test_FD002.txt  RUL_FD002.txt
-  train_FD003.txt  test_FD003.txt  RUL_FD003.txt
-  train_FD004.txt  test_FD004.txt  RUL_FD004.txt
-```
-
-Sensors used: 14 active sensors (`s1, s5, s6, s10, s16, s18, s19` dropped).
-- FD001/FD003: `n_clusters=1` (global normalization)
-- FD002/FD004: `n_clusters=6` (regime-specific normalization via KMeans)
-
-## Architecture
-
-`src/models/proxy_encoder.py`:
-- `PatchEmbedDimWise` — dimension-wise patch projection per sensor with learnable positional embeddings
-- `STARAttentionBlock` — dual spatio-temporal attention: temporal MHA per sensor + sensor MHA per timestep
-- `PatchMerging` — hierarchical patch merging across scale stages
-- `STAREncoder` — multi-scale encoder
-- `STARProxyModel` — full model: multi-scale last-patch pooling across layers, linear projection, cosine similarity against learnable proxy attractors, softmax weighting for continuous RUL prediction
-
-`src/engine/loss.py`:
-- `HybridProxyLoss` — weighted sum of MSE and KL-divergence
-- Target distribution: Gaussian soft labels over discrete proxy RUL values with adaptive sigma
-
-EMA tracking: `torch.optim.swa_utils.AveragedModel` with exponential moving average decay (0.99).
-
-## Outputs
-
-Hydra writes run artifacts to `artifacts/outputs/<timestamp>/`:
-- `checkpoints/best_proxy_FD00X.pth` — best checkpoint by test RMSE
-- `checkpoints/last_proxy_FD00X.pth` — checkpoint from the final training epoch
-- `checkpoints/epoch<N>_proxy_FD00X.pth` — checkpoint from user-specified epoch (`trainer.save_epoch=N`)
-- `metrics_FD00X.csv` — per-epoch loss and evaluation metrics
-- `plots/` — diagnostic plots, learning curves, t-SNE attractor map
-- `runs/` — TensorBoard event files
+1. **Leak-Free Validation & Normalization (`src/data.py`)**:
+   - When `use_validation=True`, engine units are split into `train_units` and `val_units` **before** calling `apply_regime_specific_normalization`, so `KMeans.fit` and cluster `mins`/`maxs` are computed strictly on `real_train_df` and applied to `val_df` and `test_df`.
+   - `extract_windows` always sorts by `time` (`.sort_values('time')`) and left-pads trajectories shorter than `seq_len` using `np.pad(data_matrix, ((pad_len, 0), (0, 0)), mode='edge')` so no short test engines are ever dropped.
+2. **RNG Seed (`seed: 50`) in `src/models.py`**:
+   - Preserves exact layer creation order in `ProxySREncoder.__init__` (`self.proxies` initialized before `self.res_head`) and decoupled parameter groups in `build_optimizer` (`no_decay` for `proxies`, `pos_embed`, `pos_bias`, `norm`, and `.bias`).

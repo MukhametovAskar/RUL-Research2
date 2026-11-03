@@ -4,10 +4,13 @@ defaults:
   - trainer: default
   - _self_
 
-seed: 43
+seed: 50
 max_rul: 125
-data_root: ./data
+data_root: /kaggle/input/datasets/kylibiaka/cmapss
+exp: 00_full_model
+out_dir: results
 
 hydra:
   run:
-    dir: artifacts/outputs/${now:%Y-%m-%d_%H-%M-%S}
+    dir: .
+  output_subdir: null

@@ -1,5 +1,8 @@
 emb_dim: 64
-num_proxies: 12
+num_proxies: 16
 temp: 0.02
 patch_size: 4
 pos_learnable: true
+sensor_pool: mean
+head_type: proxy
+use_residual: true

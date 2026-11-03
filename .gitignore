@@ -29,6 +29,9 @@ artifacts/
 runs/
 plots/
 checkpoints/
+results/
+results_backup.zip
+ABLATION_STUDY_RESULTS.md
 /data/
 *.pth
 *.csv
