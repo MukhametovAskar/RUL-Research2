@@ -205,6 +205,8 @@ def duplicate_run_summary(
         dup["config"]["exp_name"] = target_exp_name
         dup["config"]["exp_block"] = target_preset.get("block", "")
         dup["config"]["exp_title"] = target_preset.get("title", "")
+        for k, v in target_preset.get("overrides", {}).items():
+            dup["config"][k] = v
 
     run_dir = get_run_dir(out_dir, target_exp_name, dataset_name, seed, use_validation=use_val)
     os.makedirs(run_dir, exist_ok=True)
@@ -256,29 +258,51 @@ def train_and_evaluate_single_run(
     run_dir = get_run_dir(out_dir, exp_name, dataset_name, seed, use_validation=use_val)
     os.makedirs(run_dir, exist_ok=True)
 
-    val_select_mode = str(cfg.get("val_select_mode", "min")).lower()
+    val_select_mode = str(cfg.get("val_select_mode", "median_raw")).lower()
     val_ref_epoch: Optional[int] = target_epoch
     if not use_val and val_ref_epoch is None:
-        val_summary = find_existing_summary(
-            exp_name, dataset_name, seed, out_dir=out_dir, prev_results_dir=None, use_validation=True
-        )
-        if val_summary is None and prev_results_dirs:
-            for p_dir in prev_results_dirs:
-                val_summary = find_existing_summary(
-                    exp_name, dataset_name, seed, out_dir=out_dir, prev_results_dir=p_dir, use_validation=True
+        if val_select_mode == "median_raw":
+            from configs.base_config import DEFAULT_SEEDS
+
+            raw_epochs: List[int] = []
+            for s_cand in DEFAULT_SEEDS:
+                v_sum = find_existing_summary(
+                    exp_name, dataset_name, s_cand, out_dir=out_dir, prev_results_dir=None, use_validation=True
                 )
-                if val_summary is not None:
-                    break
-        if val_summary is not None:
-            raw_ep = val_summary.get("val_raw_best_epoch") or val_summary.get("best_epoch")
-            smooth_ep = val_summary.get("val_smooth3_best_epoch")
-            if val_select_mode == "smooth3" and smooth_ep is not None:
-                val_ref_epoch = int(smooth_ep)
-            elif val_select_mode == "auto" and raw_ep is not None and smooth_ep is not None:
-                # Если точечный минимум произошел слишком рано (отрыв > 2 эпох от центра окна 3 эпох), берем центр окна 3 эпох
-                val_ref_epoch = int(smooth_ep) if (int(smooth_ep) - int(raw_ep) > 2) else int(raw_ep)
-            elif raw_ep is not None:
-                val_ref_epoch = int(raw_ep)
+                if v_sum is None and prev_results_dirs:
+                    for p_dir in prev_results_dirs:
+                        v_sum = find_existing_summary(
+                            exp_name, dataset_name, s_cand, out_dir=out_dir, prev_results_dir=p_dir, use_validation=True
+                        )
+                        if v_sum is not None:
+                            break
+                if v_sum is not None:
+                    r_ep = v_sum.get("val_raw_best_epoch") or v_sum.get("best_epoch")
+                    if r_ep is not None:
+                        raw_epochs.append(int(r_ep))
+            if raw_epochs:
+                val_ref_epoch = int(round(float(np.median(raw_epochs))))
+
+        if val_ref_epoch is None:
+            val_summary = find_existing_summary(
+                exp_name, dataset_name, seed, out_dir=out_dir, prev_results_dir=None, use_validation=True
+            )
+            if val_summary is None and prev_results_dirs:
+                for p_dir in prev_results_dirs:
+                    val_summary = find_existing_summary(
+                        exp_name, dataset_name, seed, out_dir=out_dir, prev_results_dir=p_dir, use_validation=True
+                    )
+                    if val_summary is not None:
+                        break
+            if val_summary is not None:
+                raw_ep = val_summary.get("val_raw_best_epoch") or val_summary.get("best_epoch")
+                smooth_ep = val_summary.get("val_smooth3_best_epoch")
+                if val_select_mode == "smooth3" and smooth_ep is not None:
+                    val_ref_epoch = int(smooth_ep)
+                elif val_select_mode == "auto" and raw_ep is not None and smooth_ep is not None:
+                    val_ref_epoch = int(smooth_ep) if (int(smooth_ep) - int(raw_ep) > 2) else int(raw_ep)
+                elif raw_ep is not None:
+                    val_ref_epoch = int(raw_ep)
 
     mode_banner = "VALIDATION (85% Train / 15% Val)" if use_val else "FULL TRAIN (100% Train -> Test)"
     print(f"\n{'=' * 80}")
@@ -298,7 +322,10 @@ def train_and_evaluate_single_run(
 
     optimizer = build_optimizer(encoder, lr=cfg["lr"], weight_decay=cfg["weight_decay"])
     ema_encoder = AveragedModel(encoder, multi_avg_fn=get_ema_multi_avg_fn(cfg["ema_decay"]))
-    scheduler = torch.optim.lr_scheduler.CosineAnnealingLR(optimizer, T_max=cfg["epochs"], eta_min=1e-5)
+    t_max = int(cfg.get("t_max") or cfg["epochs"])
+    eta_min = float(cfg.get("eta_min", 1e-5))
+    grad_clip_norm = float(cfg.get("grad_clip_norm", 1.0))
+    scheduler = torch.optim.lr_scheduler.CosineAnnealingLR(optimizer, T_max=t_max, eta_min=eta_min)
 
     csv_path = os.path.join(run_dir, "epoch_log.csv")
     best_model_path = os.path.join(run_dir, f"best_model_{dataset_name}_seed{seed}.pth")
@@ -378,7 +405,7 @@ def train_and_evaluate_single_run(
                 )
                 loss.backward()
 
-                torch.nn.utils.clip_grad_norm_(encoder.parameters(), max_norm=1.0)
+                torch.nn.utils.clip_grad_norm_(encoder.parameters(), max_norm=grad_clip_norm)
                 optimizer.step()
                 ema_encoder.update_parameters(encoder)
 
@@ -488,7 +515,8 @@ def train_and_evaluate_single_run(
             print(
                 f"[{exp_name} | {dataset_name} | s={seed}] Epoch [{ep_num:02d}/{cfg['epochs']}] | "
                 f"Loss: {avg_loss:.3f} | MSE_L: {avg_mse_loss:.3f} | KL: {avg_kl:.3f} | Gram: {avg_order:.4f}{val_log_str} | "
-                f"Test RMSE: {epoch_test_rmse:.2f} | S-Score: {epoch_score:.2f}{ref_marker}"
+                f"Test RMSE: {epoch_test_rmse:.2f} | S-Score: {epoch_score:.2f}{ref_marker}",
+                flush=True,
             )
 
             csv_writer.writerow(

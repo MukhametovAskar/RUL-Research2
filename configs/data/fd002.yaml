@@ -8,6 +8,7 @@ window_size: 64
 n_clusters: 6
 batch_size: 64
 epochs: 16
+t_max: 16
 lr: 2e-4
 weight_decay: 1e-2
 d_model: 128

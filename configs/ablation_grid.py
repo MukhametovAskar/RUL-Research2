@@ -112,6 +112,17 @@ ABLATION_GRID: Dict[str, Dict[str, Any]] = {
 
 ALL_PRESETS: Dict[str, Dict[str, Any]] = dict(ABLATION_GRID)
 
+SHORT_EXP_ALIASES: Dict[str, str] = {
+    "00_full_model": "00_full_model",
+    "01_linear_mse_1b": "01_linear_head_standard_mse",
+    "02_linear_balanced_1k": "02_linear_head_balanced_mse_1k",
+    "03_wo_ldl_kl": "03_wo_ldl_kl_loss",
+    "04_wo_proxy_1k": "04_wo_proxy_1k_aggregation",
+    "05_wo_residual_head": "05_wo_residual_proxy_head",
+    "06_wo_gram_order": "06_wo_cosine_gram_regularizer",
+    "07_wo_regime_normalization": "07_wo_regime_normalization",
+}
+
 
 def list_ablation_names() -> List[str]:
     return list(ABLATION_GRID.keys())
@@ -124,17 +135,19 @@ def resolve_experiment_names(exp_queries: List[str]) -> List[str]:
     resolved: List[str] = []
     for query in exp_queries:
         q = str(query).strip()
+        if q in SHORT_EXP_ALIASES:
+            q = SHORT_EXP_ALIASES[q]
         if q in ALL_PRESETS:
             if q not in resolved:
                 resolved.append(q)
             continue
 
-        # Поддержка цифр '0', '1' .. '7' и '00', '01' .. '07'
-        q_padded = f"0{q}" if len(q) == 1 and q.isdigit() else q
+        # Поддержка цифр '0', '1' .. '7' и префиксов '00'..'07'
+        q_prefix = q[:2] if len(q) >= 2 and q[:2].isdigit() else (f"0{q}" if len(q) == 1 and q.isdigit() else q)
         matches = [
             name
             for name in ALL_PRESETS.keys()
-            if name.startswith(q) or name.startswith(f"{q_padded}_") or name == q_padded
+            if name.startswith(q) or name.startswith(f"{q_prefix}_") or name == q_prefix
         ]
         if matches:
             for m in matches:

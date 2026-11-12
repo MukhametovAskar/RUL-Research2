@@ -40,6 +40,9 @@ class ProxySREncoder(nn.Module):
         num_scales: int = 2,
         ffn_dim: int = 128,
         patch_size: int = 4,
+        pos_learnable: bool = True,
+        n_layers_per_scale: int = 2,
+        proxy_margin: float = 10.0,
         sensor_pool: str = "mean",
         head_type: str = "proxy",
         use_residual: bool = True,
@@ -51,8 +54,12 @@ class ProxySREncoder(nn.Module):
         self.head_type = head_type
         self.use_residual = use_residual
 
-        self.patch_embed = PatchEmbedDimWise(window, n_sensors, patch_size, d_model, pos_learnable=True)
-        self.encoder = STAREncoder(num_scales, d_model, nhead, ffn_dim, dropout=dropout, n_layers_per_scale=2)
+        self.patch_embed = PatchEmbedDimWise(
+            window, n_sensors, patch_size, d_model, pos_learnable=pos_learnable
+        )
+        self.encoder = STAREncoder(
+            num_scales, d_model, nhead, ffn_dim, dropout=dropout, n_layers_per_scale=n_layers_per_scale
+        )
 
         cur_p = math.ceil(window / patch_size)
         patch_counts = []
@@ -87,8 +94,10 @@ class ProxySREncoder(nn.Module):
         self.temp = temp
         self.device = device
 
-        # Сетка опорных значений RUL [-10, max_rul + 10] хранится как буфер для всех моделей
-        self.register_buffer("proxy_ruls", torch.linspace(-10.0, max_rul + 10.0, num_proxies))
+        # Сетка опорных значений RUL [-proxy_margin, max_rul + proxy_margin] хранится как буфер для всех моделей
+        self.register_buffer(
+            "proxy_ruls", torch.linspace(-float(proxy_margin), float(max_rul) + float(proxy_margin), num_proxies)
+        )
         self.proxy_step = (self.proxy_ruls[1] - self.proxy_ruls[0]).item()
 
         if self.head_type == "proxy":
@@ -201,6 +210,9 @@ def build_model(cfg: dict, n_sensors: int) -> ProxySREncoder:
         num_scales=cfg["num_scales"],
         ffn_dim=cfg["ffn_dim"],
         patch_size=cfg["patch_size"],
+        pos_learnable=cfg.get("pos_learnable", True),
+        n_layers_per_scale=cfg.get("n_layers_per_scale", 2),
+        proxy_margin=cfg.get("proxy_margin", 10.0),
         sensor_pool=cfg.get("sensor_pool", "mean"),
         head_type=cfg.get("head_type", "proxy"),
         use_residual=cfg.get("use_residual", True),

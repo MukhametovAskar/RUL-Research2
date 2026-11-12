@@ -1,0 +1,7 @@
+# @package _global_
+# w/o LDL / KL-Loss (kl_weight = 0) — Short alias for 03_wo_ldl_kl_loss
+# Usage: python scripts/train.py experiment=03_wo_ldl_kl data=fd001 seed=42
+
+exp: 03_wo_ldl_kl_loss
+trainer:
+  kl_weight: 0.0

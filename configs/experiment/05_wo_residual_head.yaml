@@ -1,0 +1,7 @@
+# @package _global_
+# w/o Residual Proxy Head (Coarse Proxies Only) — Short alias for 05_wo_residual_proxy_head
+# Usage: python scripts/train.py experiment=05_wo_residual_head data=fd001 seed=42
+
+exp: 05_wo_residual_proxy_head
+model:
+  use_residual: false

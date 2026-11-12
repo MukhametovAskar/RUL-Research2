@@ -38,8 +38,8 @@ def discover_summaries_by_mode(
                     else:
                         full_train_map[key] = data
 
-    # Для 07_wo_regime_normalization на однорежимных FD001/FD003 автоматически подставляем результаты 00_full_model,
-    # если они еще не скопированы явно
+    # For 07_wo_regime_normalization on single-regime FD001/FD003, automatically mirror 00_full_model
+    # if not already copied explicitly.
     for exp_name, preset in ALL_PRESETS.items():
         only_ds = preset.get("only_datasets")
         dup_from = preset.get("duplicate_from")
@@ -64,28 +64,61 @@ def discover_summaries_by_mode(
     return full_train_map, val_runs_map
 
 
+def _compute_consensus_epochs(
+    val_runs_map: Dict[Tuple[str, str, int], Dict[str, Any]],
+    mode: str = "median_raw",
+) -> Dict[Tuple[str, str], int]:
+    """
+    Computes the consensus stopping epoch E* across all available validation splits (Stage 1: 85/15)
+    for each (exp_name, dataset) pair:
+        E* = round(median_{s}(val_raw_best_epoch^{(s)}))
+    """
+    grouped: Dict[Tuple[str, str], List[int]] = {}
+    for (exp_name, ds, _), vr in val_runs_map.items():
+        if mode == "median_smooth3":
+            ep = vr.get("val_smooth3_best_epoch") or vr.get("val_raw_best_epoch") or vr.get("best_epoch")
+        else:
+            ep = vr.get("val_raw_best_epoch") or vr.get("best_epoch")
+        if ep is not None:
+            grouped.setdefault((exp_name, ds), []).append(int(ep))
+
+    consensus: Dict[Tuple[str, str], int] = {}
+    for key, ep_list in grouped.items():
+        if ep_list:
+            consensus[key] = int(round(float(np.median(ep_list))))
+    return consensus
+
+
 def _resolve_run_metrics(
     run_data: Dict[str, Any],
     val_data: Optional[Dict[str, Any]],
+    consensus_epoch: Optional[int] = None,
 ) -> Dict[str, Any]:
     resolved = dict(run_data)
-    if val_data is None:
+    if val_data is not None:
+        resolved["Val_RMSE"] = val_data.get("Val_RMSE")
+        resolved["Val_S_Score"] = val_data.get("Val_S_Score")
+        resolved["val_raw_best_epoch"] = val_data.get("val_raw_best_epoch") or val_data.get("best_epoch")
+        resolved["val_smooth3_best_epoch"] = val_data.get("val_smooth3_best_epoch")
+        resolved["val_smooth3_rmse"] = val_data.get("val_smooth3_rmse")
+
+    target_ep = consensus_epoch
+    if target_ep is None and val_data is not None:
+        val_best_ep = val_data.get("val_raw_best_epoch") or val_data.get("best_epoch")
+        if val_best_ep is not None:
+            target_ep = int(val_best_ep)
+
+    if target_ep is None:
         return resolved
 
-    val_best_ep = val_data.get("best_epoch")
-    if val_best_ep is None:
-        return resolved
-
-    val_best_ep = int(val_best_ep)
-    resolved["val_selected_epoch"] = val_best_ep
-    resolved["Val_RMSE"] = val_data.get("Val_RMSE")
-    resolved["Val_S_Score"] = val_data.get("Val_S_Score")
+    target_ep = int(target_ep)
+    resolved["val_selected_epoch"] = target_ep
 
     history = run_data.get("epoch_history", [])
     if isinstance(history, list) and history:
         for ep_item in history:
-            if int(ep_item.get("epoch", -1)) == val_best_ep:
-                resolved["best_epoch"] = val_best_ep
+            if int(ep_item.get("epoch", -1)) == target_ep:
+                resolved["best_epoch"] = target_ep
                 resolved["Test_RMSE"] = ep_item["Test_RMSE"]
                 resolved["Test_S_Score"] = ep_item["Test_S_Score"]
                 for zk in ("RMSE_0_20", "RMSE_20_50", "RMSE_50_100", "RMSE_100_150"):
@@ -126,6 +159,7 @@ def generate_all_reports(
     out_dir: str,
     prev_results_dirs: Optional[List[str]] = None,
     expected_seeds: Optional[List[int]] = None,
+    mode: str = "median_raw",
     quiet: bool = False,
 ) -> Dict[str, str]:
     if expected_seeds is None:
@@ -133,10 +167,13 @@ def generate_all_reports(
 
     os.makedirs(out_dir, exist_ok=True)
     full_train_raw, val_runs_map = discover_summaries_by_mode(out_dir, prev_results_dirs)
+    consensus_epochs = _compute_consensus_epochs(val_runs_map, mode=mode) if mode != "per_seed" else {}
 
     summaries_map: Dict[Tuple[str, str, int], Dict[str, Any]] = {}
     for key, r_data in full_train_raw.items():
-        summaries_map[key] = _resolve_run_metrics(r_data, val_runs_map.get(key))
+        exp_name, ds, _ = key
+        c_ep = consensus_epochs.get((exp_name, ds))
+        summaries_map[key] = _resolve_run_metrics(r_data, val_runs_map.get(key), consensus_epoch=c_ep)
 
     using_val_fallback = False
     if not summaries_map and val_runs_map:
@@ -152,9 +189,9 @@ def generate_all_reports(
     val_summary_md_path = os.path.join(out_dir, "val_epochs_summary.md")
     if val_runs_map:
         val_lines = [
-            "# 🎯 Validation Best Epochs Summary (85% Train / 15% Val)",
+            "# Validation Best Epochs Summary (85% Train / 15% Val)",
             "",
-            "| Experiment | Dataset | Seed | Selected Epoch (`best_epoch`) | Raw Min Epoch | Min `Val_RMSE` | Smooth-3 Center Epoch | Smooth-3 `Val_RMSE` | `Val_S_Score` | `Test_RMSE` (85% train) |",
+            "| Experiment | Dataset | Seed | Consensus Epoch (`E*`) | Raw Min Epoch | Min `Val_RMSE` | Smooth-3 Center Epoch | Smooth-3 `Val_RMSE` | `Val_S_Score` | `Test_RMSE` (85% train) |",
             "| :--- | :---: | :---: | :---: | :---: | :---: | :---: | :---: | :---: | :---: |",
         ]
         sorted_val = sorted(
@@ -167,6 +204,7 @@ def generate_all_reports(
         )
         for vr in sorted_val:
             raw_ep = vr.get("val_raw_best_epoch") or vr.get("best_epoch")
+            c_ep = consensus_epochs.get((vr["exp_name"], vr["dataset"]), vr.get("best_epoch"))
             smooth_ep = vr.get("val_smooth3_best_epoch")
             smooth_ep_str = f"Epoch {smooth_ep}" if smooth_ep is not None else "—"
             smooth_rmse_str = f"{vr['val_smooth3_rmse']:.2f}" if vr.get("val_smooth3_rmse") is not None else "—"
@@ -174,7 +212,7 @@ def generate_all_reports(
             v_score = f"{vr['Val_S_Score']:.2f}" if vr.get("Val_S_Score") is not None else "—"
             t_rmse = f"{vr['Test_RMSE']:.2f}" if vr.get("Test_RMSE") is not None else "—"
             val_lines.append(
-                f"| `{vr['exp_name']}` | {vr['dataset']} | `{vr['seed']}` | **Epoch {vr['best_epoch']}** | "
+                f"| `{vr['exp_name']}` | {vr['dataset']} | `{vr['seed']}` | **Epoch {c_ep}** | "
                 f"Epoch {raw_ep} | {v_rmse} | {smooth_ep_str} | {smooth_rmse_str} | {v_score} | {t_rmse} |"
             )
         with open(val_summary_md_path, mode="w", encoding="utf-8") as f:
@@ -246,7 +284,7 @@ def generate_all_reports(
     avg_sec_per_run = total_elapsed_sec / len(all_recorded_runs) if all_recorded_runs else 0.0
 
     progress_lines = [
-        "# 📊 Ablation Study Progress Status (Multi-Seed)",
+        "# Ablation Study Progress Status (Multi-Seed)",
         "",
         f"- **Target Seeds ({len(expected_seeds)}):** `{expected_seeds}`",
         f"- **Stage 1 — Validation (85% Train / 15% Val):** **{completed_val_runs} / {total_target_runs}** ({pct_val:.1f}%)",
@@ -272,7 +310,7 @@ def generate_all_reports(
             k_val = sum(1 for s in expected_seeds if (exp_name, ds, int(s)) in val_runs_map)
             exp_full_done += k_full
             exp_val_done += k_val
-            icon = "✅" if k_full == len(expected_seeds) else ("⏳" if (k_full > 0 or k_val > 0) else "⬜")
+            icon = "DONE" if k_full == len(expected_seeds) else ("WAIT" if (k_full > 0 or k_val > 0) else "TODO")
             ds_cells.append(f"{icon} {k_full}/{len(expected_seeds)} (val:{k_val})")
 
         progress_lines.append(
@@ -288,7 +326,9 @@ def generate_all_reports(
     for exp_name in exp_order:
         agg_stats[exp_name] = {"datasets": {}, "seed_counts": []}
         macro_rmse_means = []
+        macro_rmse_stds = []
         macro_score_means = []
+        macro_score_stds = []
 
         for ds in DATASETS:
             runs_ds = [
@@ -311,8 +351,10 @@ def generate_all_reports(
 
             if rmse_m is not None:
                 macro_rmse_means.append(rmse_m)
+                macro_rmse_stds.append(rmse_s or 0.0)
             if score_m is not None:
                 macro_score_means.append(score_m)
+                macro_score_stds.append(score_s or 0.0)
 
             agg_stats[exp_name]["datasets"][ds] = {
                 "n": n_seeds,
@@ -331,20 +373,26 @@ def generate_all_reports(
         agg_stats[exp_name]["macro_rmse"] = (
             float(np.mean(macro_rmse_means)) if macro_rmse_means else None
         )
+        agg_stats[exp_name]["macro_rmse_std"] = (
+            float(np.mean(macro_rmse_stds)) if macro_rmse_stds else None
+        )
         agg_stats[exp_name]["macro_score"] = (
             float(np.mean(macro_score_means)) if macro_score_means else None
+        )
+        agg_stats[exp_name]["macro_score_std"] = (
+            float(np.mean(macro_score_stds)) if macro_score_stds else None
         )
 
     sota_key = "00_full_model"
     sota_macro_rmse = agg_stats.get(sota_key, {}).get("macro_rmse", None)
 
     mode_note = (
-        "> ⚠️ Note: Table is built from preliminary validation (85/15) runs since 100% full-train runs are not yet available."
+        "> Note: Table is built from preliminary validation (85/15) runs since 100% full-train runs are not yet available."
         if using_val_fallback
-        else "> ✅ Note: Where validation (85/15) runs exist, 100% train test metrics are evaluated at `val_best_epoch`."
+        else f"> Note: Stage-2 (100% train) test metrics are evaluated strictly at the consensus validation epoch `E*` (`mode={mode}` across 5 validation splits)."
     )
     summary_lines = [
-        "# 📈 Ablation Study Summary (NASA C-MAPSS FD001–FD004)",
+        "# Ablation Study Summary (NASA C-MAPSS FD001–FD004)",
         "",
         mode_note,
         "",
@@ -369,12 +417,14 @@ def generate_all_reports(
         for ds in DATASETS:
             d_st = st["datasets"][ds]
             ds_cols.append(_fmt_md(d_st["rmse_mean"], d_st["rmse_std"], d_st["n"], decimals=2))
-            ds_cols.append(_fmt_md(d_st["score_mean"], d_st["score_std"], d_st["n"], decimals=1))
+            ds_cols.append(_fmt_md(d_st["score_mean"], d_st["score_std"], d_st["n"], decimals=2))
 
         macro_rmse = st["macro_rmse"]
+        macro_rmse_std = st["macro_rmse_std"]
         macro_score = st["macro_score"]
-        macro_rmse_str = f"**{macro_rmse:.2f}**" if macro_rmse is not None else "—"
-        macro_score_str = f"{macro_score:.1f}" if macro_score is not None else "—"
+        macro_score_std = st["macro_score_std"]
+        macro_rmse_str = f"**{macro_rmse:.2f} ± {macro_rmse_std:.2f}**" if macro_rmse is not None else "—"
+        macro_score_str = f"**{macro_score:.2f} ± {macro_score_std:.2f}**" if macro_score is not None else "—"
 
         if exp_name == sota_key and macro_rmse is not None:
             delta_str = "0.00 (Ref)"
@@ -412,28 +462,39 @@ def generate_all_reports(
 
     for exp_name in exp_order:
         st = agg_stats[exp_name]
-        z0_list, z20_list, z50_list, z100_list, pphys_list, prul_list = [], [], [], [], [], []
+        z0_m, z0_s = [], []
+        z20_m, z20_s = [], []
+        z50_m, z50_s = [], []
+        z100_m, z100_s = [], []
+        pphys_list, prul_list = [], []
         for ds in DATASETS:
             d_st = st["datasets"][ds]
             if d_st["z0_20"][0] is not None:
-                z0_list.append(d_st["z0_20"][0])
+                z0_m.append(d_st["z0_20"][0])
+                z0_s.append(d_st["z0_20"][1] or 0.0)
             if d_st["z20_50"][0] is not None:
-                z20_list.append(d_st["z20_50"][0])
+                z20_m.append(d_st["z20_50"][0])
+                z20_s.append(d_st["z20_50"][1] or 0.0)
             if d_st["z50_100"][0] is not None:
-                z50_list.append(d_st["z50_100"][0])
+                z50_m.append(d_st["z50_100"][0])
+                z50_s.append(d_st["z50_100"][1] or 0.0)
             if d_st["z100_150"][0] is not None:
-                z100_list.append(d_st["z100_150"][0])
+                z100_m.append(d_st["z100_150"][0])
+                z100_s.append(d_st["z100_150"][1] or 0.0)
             if d_st["pcc_phys"][0] is not None:
                 pphys_list.append(d_st["pcc_phys"][0])
             if d_st["pcc_rul"][0] is not None:
                 prul_list.append(d_st["pcc_rul"][0])
 
-        def _fmt_avg(lst: List[float], dec: int = 2) -> str:
+        def _fmt_zone(m_lst: List[float], s_lst: List[float]) -> str:
+            return f"{float(np.mean(m_lst)):.2f} ± {float(np.mean(s_lst)):.2f}" if m_lst else "—"
+
+        def _fmt_avg(lst: List[float], dec: int = 3) -> str:
             return f"{float(np.mean(lst)):.{dec}f}" if lst else "—"
 
         summary_lines.append(
-            f"| `{exp_name}` | {_fmt_avg(z0_list)} | {_fmt_avg(z20_list)} | {_fmt_avg(z50_list)} | "
-            f"{_fmt_avg(z100_list)} | {_fmt_avg(pphys_list, 3)} | {_fmt_avg(prul_list, 3)} |"
+            f"| `{exp_name}` | {_fmt_zone(z0_m, z0_s)} | {_fmt_zone(z20_m, z20_s)} | {_fmt_zone(z50_m, z50_s)} | "
+            f"{_fmt_zone(z100_m, z100_s)} | {_fmt_avg(pphys_list, 3)} | {_fmt_avg(prul_list, 3)} |"
         )
 
     summary_md_path = os.path.join(out_dir, "ablation_summary.md")
@@ -474,11 +535,13 @@ def generate_all_reports(
         for ds in DATASETS:
             d_st = st["datasets"][ds]
             cells.append(_fmt_tex(d_st["rmse_mean"], d_st["rmse_std"], d_st["n"], decimals=2, bold=is_sota))
-            cells.append(_fmt_tex(d_st["score_mean"], d_st["score_std"], d_st["n"], decimals=1, bold=is_sota))
+            cells.append(_fmt_tex(d_st["score_mean"], d_st["score_std"], d_st["n"], decimals=2, bold=is_sota))
 
         macro_rmse = st["macro_rmse"]
+        macro_rmse_std = st["macro_rmse_std"]
         if macro_rmse is not None:
-            macro_str = f"$\\mathbf{{{macro_rmse:.2f}}}$" if is_sota else f"${macro_rmse:.2f}$"
+            val_str = f"{macro_rmse:.2f} \\pm {macro_rmse_std:.2f}"
+            macro_str = f"$\\mathbf{{{val_str}}}$" if is_sota else f"${val_str}$"
         else:
             macro_str = "--"
 
@@ -567,6 +630,13 @@ def parse_args() -> argparse.Namespace:
         default=DEFAULT_SEEDS,
         help="Expected seeds for N/5 progress calculation (default: 42 43 44 45 50).",
     )
+    parser.add_argument(
+        "--mode",
+        type=str,
+        default="median_raw",
+        choices=["median_raw", "median_smooth3", "per_seed"],
+        help="Validation stopping epoch selection protocol (default: median_raw consensus across 5 splits).",
+    )
     return parser.parse_args()
 
 
@@ -576,5 +646,6 @@ if __name__ == "__main__":
         out_dir=args.out_dir,
         prev_results_dirs=args.prev_results_dir,
         expected_seeds=args.seeds,
+        mode=args.mode,
         quiet=False,
     )

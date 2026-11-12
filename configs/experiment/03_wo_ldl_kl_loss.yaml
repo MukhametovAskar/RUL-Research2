@@ -1,0 +1,8 @@
+# @package _global_
+# w/o LDL / KL-Loss (kl_weight = 0)
+# Mirrors configs/ablation_grid.py (single source of truth used by run_ablation.py).
+# Usage: python -m src.train experiment=03_wo_ldl_kl_loss data=fd002 seed=42
+
+exp: 03_wo_ldl_kl_loss
+trainer:
+  kl_weight: 0.0

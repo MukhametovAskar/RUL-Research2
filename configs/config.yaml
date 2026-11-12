@@ -3,6 +3,7 @@ defaults:
   - data: fd001
   - trainer: default
   - _self_
+  - experiment: null   # e.g. experiment=03_wo_ldl_kl_loss (configs/experiment/*.yaml)
 
 seed: 50
 max_rul: 125

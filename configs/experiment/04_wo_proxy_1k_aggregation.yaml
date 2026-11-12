@@ -1,0 +1,8 @@
+# @package _global_
+# w/o Proxy-Centric 1/K Aggregation (Standard 1/B)
+# Mirrors configs/ablation_grid.py (single source of truth used by run_ablation.py).
+# Usage: python -m src.train experiment=04_wo_proxy_1k_aggregation data=fd002 seed=42
+
+exp: 04_wo_proxy_1k_aggregation
+trainer:
+  use_proxy_1k: false

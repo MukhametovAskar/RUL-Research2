@@ -11,34 +11,45 @@ from src.trainer import train_and_evaluate_single_run
 
 def _normalize_cli_args(argv: List[str]) -> List[str]:
     """
-    Позволяет передавать как стандартные Hydra-аргументы (data=fd001 seed=50),
-    так и привычные CLI-флаги через '--' (--dataset FD001 --seed 50 --exp 0 --epochs 24 и т.д.).
+    Allows passing standard Hydra arguments (experiment=03_wo_ldl_kl data=fd001 seed=50)
+    as well as CLI flags via '--' (--dataset FD001 --seed 50 --exp 0 --epochs 30, etc.).
     """
     flag_map = {
         "--dataset": "data",
         "--data": "data",
         "--seed": "seed",
         "--exp": "exp",
+        "--experiment": "experiment",
         "--data_dir": "data_root",
         "--data_root": "data_root",
         "--out_dir": "out_dir",
         "--save_dir": "out_dir",
         "--max_rul": "max_rul",
         "--epochs": "trainer.epochs",
+        "--t_max": "trainer.t_max",
+        "--eta_min": "trainer.eta_min",
+        "--grad_clip_norm": "trainer.grad_clip_norm",
         "--ema_decay": "trainer.ema_decay",
         "--kl_weight": "trainer.kl_weight",
         "--mse_weight": "trainer.mse_weight",
         "--lambda_order": "trainer.lambda_order",
+        "--ldl_sigma_ratio": "trainer.ldl_sigma_ratio",
+        "--proxy_active_threshold": "trainer.proxy_active_threshold",
         "--use_proxy_1k": "trainer.use_proxy_1k",
         "--norm_mode": "trainer.norm_mode",
         "--use_validation": "trainer.use_validation",
         "--val_split": "trainer.val_split",
+        "--val_select_mode": "trainer.val_select_mode",
         "--save_epoch": "trainer.save_epoch",
+        "--target_epoch": "trainer.target_epoch",
         "--device": "trainer.device",
         "--num_proxies": "model.num_proxies",
         "--temp": "model.temp",
         "--emb_dim": "model.emb_dim",
         "--patch_size": "model.patch_size",
+        "--pos_learnable": "model.pos_learnable",
+        "--n_layers_per_scale": "model.n_layers_per_scale",
+        "--proxy_margin": "model.proxy_margin",
         "--sensor_pool": "model.sensor_pool",
         "--head_type": "model.head_type",
         "--use_residual": "model.use_residual",
@@ -121,15 +132,15 @@ def _str_to_bool(val: str) -> bool:
 def _run_without_hydra(normalized_argv: List[str]) -> None:
     if any(a in ("-h", "--help") for a in normalized_argv[1:]):
         print(
-            "Usage: python -m src.train [--dataset FD001] [--seed 50] [--exp 00_full_model] [--epochs N] "
-            "[data=fd001] [seed=50] [exp=00_full_model] ..."
+            "Usage: python scripts/train.py [experiment=03_wo_ldl_kl] [data=fd001] [seed=50] "
+            "[--dataset FD001] [--seed 50] [--exp 00_full_model] [--epochs N] ..."
         )
         return
 
     ov = _parse_kv_overrides(normalized_argv)
     dataset_name = ov.get("data", "fd001").upper()
     seed = int(ov.get("seed", "50"))
-    exp_query = ov.get("exp", "00_full_model")
+    exp_query = ov.get("experiment", ov.get("exp", "00_full_model"))
     exp_name = resolve_experiment_names([exp_query])[0]
 
     run_cfg = get_ablation_config(exp_name=exp_name, dataset_name=dataset_name, seed=seed)
@@ -152,6 +163,8 @@ def _run_without_hydra(normalized_argv: List[str]) -> None:
         "data.batch_size": "batch_size",
         "trainer.epochs": "epochs",
         "data.epochs": "epochs",
+        "trainer.t_max": "t_max",
+        "data.t_max": "t_max",
         "data.d_model": "d_model",
         "data.nhead": "nhead",
         "data.num_scales": "num_scales",
@@ -159,6 +172,7 @@ def _run_without_hydra(normalized_argv: List[str]) -> None:
         "model.emb_dim": "emb_dim",
         "model.num_proxies": "num_proxies",
         "model.patch_size": "patch_size",
+        "model.n_layers_per_scale": "n_layers_per_scale",
     }
     for k, target in int_map.items():
         if k in ov and ov[k].lower() != "null":
@@ -169,10 +183,15 @@ def _run_without_hydra(normalized_argv: List[str]) -> None:
         "data.weight_decay": "weight_decay",
         "data.dropout": "dropout",
         "model.temp": "temp",
+        "model.proxy_margin": "proxy_margin",
+        "trainer.eta_min": "eta_min",
+        "trainer.grad_clip_norm": "grad_clip_norm",
         "trainer.ema_decay": "ema_decay",
         "trainer.kl_weight": "kl_weight",
         "trainer.mse_weight": "mse_weight",
         "trainer.lambda_order": "lambda_order",
+        "trainer.ldl_sigma_ratio": "ldl_sigma_ratio",
+        "trainer.proxy_active_threshold": "proxy_active_threshold",
         "trainer.val_split": "val_split",
     }
     for k, target in float_map.items():
@@ -180,6 +199,7 @@ def _run_without_hydra(normalized_argv: List[str]) -> None:
             run_cfg[target] = float(ov[k])
 
     bool_map = {
+        "model.pos_learnable": "pos_learnable",
         "model.use_residual": "use_residual",
         "trainer.use_proxy_1k": "use_proxy_1k",
         "trainer.use_validation": "use_validation",
@@ -192,6 +212,7 @@ def _run_without_hydra(normalized_argv: List[str]) -> None:
         "model.sensor_pool": "sensor_pool",
         "model.head_type": "head_type",
         "trainer.norm_mode": "norm_mode",
+        "trainer.val_select_mode": "val_select_mode",
     }
     for k, target in str_map.items():
         if k in ov:
@@ -200,13 +221,24 @@ def _run_without_hydra(normalized_argv: List[str]) -> None:
     if "trainer.save_epoch" in ov and ov["trainer.save_epoch"].lower() != "null":
         run_cfg["save_epoch"] = int(ov["trainer.save_epoch"])
 
+    target_ep = (
+        int(ov["trainer.target_epoch"])
+        if "trainer.target_epoch" in ov and ov["trainer.target_epoch"].lower() != "null"
+        else None
+    )
     save_weights = _str_to_bool(ov.get("trainer.save_weights", "true"))
     save_plots = _str_to_bool(ov.get("trainer.save_plots", "true"))
     enable_tb = _str_to_bool(ov.get("trainer.enable_tb", "true"))
 
+    if any(a in ("--cfg", "--info") for a in normalized_argv[1:]):
+        for k, v in run_cfg.items():
+            print(f"{k}: {v}")
+        return
+
     train_and_evaluate_single_run(
         cfg=run_cfg,
         out_dir=out_dir,
+        target_epoch=target_ep,
         save_weights=save_weights,
         save_plots=save_plots,
         enable_tb=enable_tb,
@@ -239,6 +271,13 @@ try:
         run_cfg["epochs"] = (
             int(cfg.trainer.epochs) if cfg.trainer.epochs is not None else int(cfg.data.epochs)
         )
+        run_cfg["t_max"] = (
+            int(cfg.trainer.t_max)
+            if cfg.trainer.get("t_max", None) is not None
+            else int(cfg.data.get("t_max", run_cfg["epochs"]))
+        )
+        run_cfg["eta_min"] = float(cfg.trainer.get("eta_min", 1e-5))
+        run_cfg["grad_clip_norm"] = float(cfg.trainer.get("grad_clip_norm", 1.0))
         run_cfg["lr"] = float(cfg.data.lr)
         run_cfg["weight_decay"] = float(cfg.data.weight_decay)
         run_cfg["d_model"] = int(cfg.data.d_model)
@@ -251,10 +290,16 @@ try:
         run_cfg["num_proxies"] = int(cfg.model.num_proxies)
         run_cfg["temp"] = float(cfg.model.temp)
         run_cfg["patch_size"] = int(cfg.model.patch_size)
+        run_cfg["pos_learnable"] = bool(cfg.model.get("pos_learnable", True))
+        run_cfg["n_layers_per_scale"] = int(cfg.model.get("n_layers_per_scale", 2))
+        run_cfg["proxy_margin"] = float(cfg.model.get("proxy_margin", 10.0))
         run_cfg["sensor_pool"] = str(cfg.model.sensor_pool)
         run_cfg["ema_decay"] = float(cfg.trainer.ema_decay)
+        run_cfg["ldl_sigma_ratio"] = float(cfg.trainer.get("ldl_sigma_ratio", 0.5))
+        run_cfg["proxy_active_threshold"] = float(cfg.trainer.get("proxy_active_threshold", 0.35))
         run_cfg["use_validation"] = bool(cfg.trainer.use_validation)
         run_cfg["val_split"] = float(cfg.trainer.val_split)
+        run_cfg["val_select_mode"] = str(cfg.trainer.get("val_select_mode", "median_raw"))
         run_cfg["save_epoch"] = cfg.trainer.save_epoch
 
         if str(cfg.model.head_type) != default_base["head_type"]:
@@ -272,9 +317,11 @@ try:
         if str(cfg.trainer.norm_mode) != default_base["norm_mode"]:
             run_cfg["norm_mode"] = str(cfg.trainer.norm_mode)
 
+        target_epoch = cfg.trainer.get("target_epoch", None)
         train_and_evaluate_single_run(
             cfg=run_cfg,
             out_dir=str(cfg.out_dir),
+            target_epoch=int(target_epoch) if target_epoch is not None else None,
             save_weights=bool(cfg.trainer.get("save_weights", True)),
             save_plots=bool(cfg.trainer.get("save_plots", True)),
             enable_tb=bool(cfg.trainer.get("enable_tb", True)),

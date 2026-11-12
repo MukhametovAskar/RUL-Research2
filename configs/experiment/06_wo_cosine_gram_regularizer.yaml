@@ -1,0 +1,8 @@
+# @package _global_
+# w/o Cosine Gram Regularizer (lambda_order = 0)
+# Mirrors configs/ablation_grid.py (single source of truth used by run_ablation.py).
+# Usage: python -m src.train experiment=06_wo_cosine_gram_regularizer data=fd002 seed=42
+
+exp: 06_wo_cosine_gram_regularizer
+trainer:
+  lambda_order: 0.0

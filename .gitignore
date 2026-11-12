@@ -1,9 +1,9 @@
+# Byte-compiled / optimized / DLL files
 __pycache__/
 *.py[cod]
 *$py.class
 *.so
 .Python
-env/
 build/
 develop-eggs/
 dist/
@@ -20,21 +20,41 @@ wheels/
 .installed.cfg
 *.egg
 
+# Virtual environments
 .env
 .venv
 venv/
 ENV/
+env/
 
+# Raw C-MAPSS datasets (keep directory structure via .gitkeep)
+data/*
+!data/.gitkeep
+
+# Heavy training artifacts, checkpoints, logs, and local scratch scripts
 artifacts/
 runs/
+runs_val/
 plots/
 checkpoints/
 results/
+outputs/
+multirun/
+.hydra/
+scratch/
 results_backup.zip
-ABLATION_STUDY_RESULTS.md
-/data/
 *.pth
+*.pt
+*.ckpt
+*.onnx
+events.out.tfevents*
 *.csv
+*.jsonl
+metrics_summary.json
+
+# Jupyter / IDE / OS
+.ipynb_checkpoints/
 .DS_Store
+Thumbs.db
 .idea/
 .vscode/

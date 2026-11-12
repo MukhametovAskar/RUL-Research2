@@ -201,15 +201,22 @@ def prepare_dataloaders(
     cols_to_drop = ["op1", "op2", "op3", "regime_idx"]
 
     if cfg.get("use_validation", False):
-        # Сплит двигателей на трейн и валидацию выполняется ДО нормализации и KMeans (без утечки данных)
-        all_units = train_df["unit"].unique()
-        num_val_units = int(len(all_units) * cfg.get("val_split", 0.15))
+        # Стратифицированный сплит двигателей по квантилям длины жизни (для стабильной высоты валидационной кривой)
+        # Выполняется строго ДО нормализации и KMeans (без утечки данных)
+        unit_lengths = train_df.groupby("unit")["time"].max().sort_values()
+        sorted_units = unit_lengths.index.values
 
-        val_units = np.random.choice(all_units, num_val_units, replace=False)
-        train_units = np.setdiff1d(all_units, val_units)
+        num_val_units = int(len(sorted_units) * cfg.get("val_split", 0.15))
+        bins = np.array_split(sorted_units, num_val_units)
+
+        rng = np.random.RandomState(cfg.get("seed", 42))
+        val_units = np.array([rng.choice(b) for b in bins], dtype=sorted_units.dtype)
+        train_units = np.setdiff1d(sorted_units, val_units)
+        val_units.sort()
+        train_units.sort()
 
         print(
-            f"[{dataset_name}] Validation mode: Train units = {len(train_units)} | Val units = {len(val_units)}"
+            f"[{dataset_name}] Validation mode (Stratified): Train units = {len(train_units)} | Val units = {len(val_units)}"
         )
 
         real_train_df = train_df[train_df["unit"].isin(train_units)].copy()

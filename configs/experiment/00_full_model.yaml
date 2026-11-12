@@ -1,0 +1,6 @@
+# @package _global_
+# Full Proposed Model
+# Mirrors configs/ablation_grid.py (single source of truth used by run_ablation.py).
+# Usage: python -m src.train experiment=00_full_model data=fd002 seed=42
+
+exp: 00_full_model

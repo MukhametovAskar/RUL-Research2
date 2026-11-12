@@ -1,0 +1,7 @@
+# @package _global_
+# w/o Cosine Gram Regularizer (lambda_order = 0) — Short alias for 06_wo_cosine_gram_regularizer
+# Usage: python scripts/train.py experiment=06_wo_gram_order data=fd001 seed=42
+
+exp: 06_wo_cosine_gram_regularizer
+trainer:
+  lambda_order: 0.0

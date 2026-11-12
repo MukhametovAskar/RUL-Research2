@@ -1,0 +1,8 @@
+# @package _global_
+# w/o Regime-Specific Normalization (Global Norm on FD002/FD004)
+# Mirrors configs/ablation_grid.py (single source of truth used by run_ablation.py).
+# Usage: python -m src.train experiment=07_wo_regime_normalization data=fd002 seed=42
+
+exp: 07_wo_regime_normalization
+trainer:
+  norm_mode: global

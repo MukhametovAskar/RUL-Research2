@@ -1,0 +1,13 @@
+# @package _global_
+# Linear Head + Standard MSE (1/B) — Short alias for 01_linear_head_standard_mse
+# Usage: python scripts/train.py experiment=01_linear_mse_1b data=fd001 seed=42
+
+exp: 01_linear_head_standard_mse
+model:
+  head_type: linear
+  use_residual: false
+trainer:
+  use_proxy_1k: false
+  mse_weight: 1.0
+  kl_weight: 0.0
+  lambda_order: 0.0

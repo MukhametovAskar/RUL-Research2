@@ -1,0 +1,14 @@
+# @package _global_
+# Linear Head + Balanced MSE (1/K)
+# Mirrors configs/ablation_grid.py (single source of truth used by run_ablation.py).
+# Usage: python -m src.train experiment=02_linear_head_balanced_mse_1k data=fd002 seed=42
+
+exp: 02_linear_head_balanced_mse_1k
+model:
+  head_type: linear
+  use_residual: false
+trainer:
+  use_proxy_1k: true
+  mse_weight: 1.0
+  kl_weight: 0.0
+  lambda_order: 0.0

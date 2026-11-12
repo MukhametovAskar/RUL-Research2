@@ -1,0 +1,8 @@
+# @package _global_
+# w/o Residual Proxy Head (Coarse Proxies Only)
+# Mirrors configs/ablation_grid.py (single source of truth used by run_ablation.py).
+# Usage: python -m src.train experiment=05_wo_residual_proxy_head data=fd002 seed=42
+
+exp: 05_wo_residual_proxy_head
+model:
+  use_residual: false

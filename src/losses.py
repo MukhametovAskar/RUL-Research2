@@ -15,6 +15,8 @@ class HybridProxyLoss(nn.Module):
         kl_weight: float = 1.0,
         mse_weight: float = 0.05,
         lambda_order: float = 0.5,
+        ldl_sigma_ratio: float = 0.5,
+        proxy_active_threshold: float = 0.35,
         use_proxy_1k: bool = True,
         use_residual: bool = True,
         head_type: str = "proxy",
@@ -26,12 +28,14 @@ class HybridProxyLoss(nn.Module):
         self.kl_weight = kl_weight
         self.mse_weight = mse_weight
         self.lambda_order = lambda_order
+        self.ldl_sigma_ratio = ldl_sigma_ratio
+        self.proxy_active_threshold = proxy_active_threshold
         self.use_proxy_1k = use_proxy_1k
         self.use_residual = use_residual
         self.head_type = head_type
 
         self.step = (proxy_ruls[1] - proxy_ruls[0]).item()
-        self.sigma = 0.5 * self.step
+        self.sigma = float(self.ldl_sigma_ratio) * self.step
 
         dist = (proxy_ruls[:, None] - proxy_ruls[None, :]).abs()
         max_dist = (proxy_ruls[-1] - proxy_ruls[0]).item()
@@ -66,7 +70,8 @@ class HybridProxyLoss(nn.Module):
     ) -> Tuple[torch.Tensor, torch.Tensor, torch.Tensor, torch.Tensor, torch.Tensor]:
         target_probs = self.get_target_probs(true_rul)
         proxy_mass = target_probs.sum(dim=0)
-        active = proxy_mass > 0.1
+        # Invariant (AGENTS.md): active = proxy_mass > 0.35 (configurable via proxy_active_threshold)
+        active = proxy_mass > self.proxy_active_threshold
 
         mse_pred_per_sample = (pred_rul - true_rul) ** 2
         loss_mse_res = self._aggregate(mse_pred_per_sample, target_probs, proxy_mass, active)
@@ -106,7 +111,8 @@ class HybridProxyLoss(nn.Module):
 def build_criterion(cfg: dict, model: nn.Module) -> HybridProxyLoss:
     proxy_ruls = getattr(model, "proxy_ruls", None)
     if proxy_ruls is None:
-        proxy_ruls = torch.linspace(-10.0, cfg["max_rul"] + 10.0, cfg["num_proxies"])
+        margin = float(cfg.get("proxy_margin", 10.0))
+        proxy_ruls = torch.linspace(-margin, float(cfg["max_rul"]) + margin, cfg["num_proxies"])
 
     return HybridProxyLoss(
         proxy_ruls=proxy_ruls,
@@ -115,6 +121,8 @@ def build_criterion(cfg: dict, model: nn.Module) -> HybridProxyLoss:
         kl_weight=cfg.get("kl_weight", 1.0),
         mse_weight=cfg.get("mse_weight", 0.05),
         lambda_order=cfg.get("lambda_order", 0.5),
+        ldl_sigma_ratio=cfg.get("ldl_sigma_ratio", 0.5),
+        proxy_active_threshold=cfg.get("proxy_active_threshold", 0.35),
         use_proxy_1k=cfg.get("use_proxy_1k", True),
         use_residual=cfg.get("use_residual", True),
         head_type=cfg.get("head_type", "proxy"),

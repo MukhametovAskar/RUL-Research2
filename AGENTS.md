@@ -33,7 +33,10 @@ python aggregate_results.py --out_dir results
 ## Strict Invariants
 
 1. **Leak-Free Validation & Normalization (`src/data.py`)**:
-   - When `use_validation=True`, engine units are split into `train_units` and `val_units` **before** calling `apply_regime_specific_normalization`, so `KMeans.fit` and cluster `mins`/`maxs` are computed strictly on `real_train_df` and applied to `val_df` and `test_df`.
+   - When `use_validation=True`, engine units are split into `train_units` and `val_units` using stratified sampling across quantiles of engine lifespan (`train_df.groupby('unit')['time'].max().sort_values()`) with `rng = np.random.RandomState(seed)` **before** calling `apply_regime_specific_normalization`, so `KMeans.fit` and cluster `mins`/`maxs` are computed strictly on `real_train_df` and applied to `val_df` and `test_df`.
    - `extract_windows` always sorts by `time` (`.sort_values('time')`) and left-pads trajectories shorter than `seq_len` using `np.pad(data_matrix, ((pad_len, 0), (0, 0)), mode='edge')` so no short test engines are ever dropped.
-2. **RNG Seed (`seed: 50`) in `src/models.py`**:
+2. **Proxy Activity & Loss Invariants (`src/losses.py`)**:
+   - `active = proxy_mass > 0.35` ensures safe isolation: captures real single examples in worst-case midpoint ($0.491$) while suppressing spurious tails ($0.106 - 0.21$).
+   - Epoch defaults: FD001 = 30, FD002 = 16, FD003 = 30, FD004 = 16.
+3. **RNG Seed in `src/models.py`**:
    - Preserves exact layer creation order in `ProxySREncoder.__init__` (`self.proxies` initialized before `self.res_head`) and decoupled parameter groups in `build_optimizer` (`no_decay` for `proxies`, `pos_embed`, `pos_bias`, `norm`, and `.bias`).
